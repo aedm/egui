@@ -279,6 +279,12 @@ pub enum SurfaceErrorAction {
     RecreateSurface,
 }
 
+/// Props passed to the `on_paint_background` callback.
+pub struct PaintBackgroundProps {
+    pub surface_view: wgpu::TextureView,
+    pub surface_size: [u32; 2],
+}
+
 /// Configuration for using wgpu with eframe or the egui-wgpu winit feature.
 #[derive(Clone)]
 pub struct WgpuConfiguration {
@@ -299,6 +305,11 @@ pub struct WgpuConfiguration {
 
     /// Callback for surface errors.
     pub on_surface_error: Arc<dyn Fn(wgpu::SurfaceError) -> SurfaceErrorAction + Send + Sync>,
+
+    /// Optional callback to paint the background. If set, egui doesn't clear the surface before
+    /// painting UI elements. Instead, it will call this callback which should set every pixel
+    /// of the surface.
+    pub paint_background_hook: Option<Arc<dyn Fn(PaintBackgroundProps) + Send + Sync>>,
 }
 
 #[test]
@@ -314,6 +325,7 @@ impl std::fmt::Debug for WgpuConfiguration {
             desired_maximum_frame_latency,
             wgpu_setup,
             on_surface_error: _,
+            paint_background_hook: _,
         } = self;
         f.debug_struct("WgpuConfiguration")
             .field("present_mode", &present_mode)
@@ -342,6 +354,7 @@ impl Default for WgpuConfiguration {
                 }
                 SurfaceErrorAction::SkipFrame
             }),
+            paint_background_hook: None,
         }
     }
 }

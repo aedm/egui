@@ -1,0 +1,27 @@
+[package]
+name = "overlay"
+version = "0.1.0"
+authors = ["Gabor Gyebnar <korteur@gmail.com>"]
+license = "MIT OR Apache-2.0"
+edition = "2021"
+rust-version = "1.81"
+publish = false
+
+[lints]
+workspace = true
+
+
+[dependencies]
+eframe = { workspace = true, features = [
+    "default",
+    "wgpu",
+    "__screenshot", # __screenshot is so we can dump a screenshot using EFRAME_SCREENSHOT_TO
+] }
+env_logger = { version = "0.10", default-features = false, features = [
+    "auto-color",
+    "humantime",
+] }
+egui-wgpu = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true, features = ["derive"] }

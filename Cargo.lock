@@ -3042,6 +3042,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eframe",
+ "egui-wgpu",
+ "env_logger",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -2,7 +2,7 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 use crate::capture::{capture_channel, CaptureReceiver, CaptureSender, CaptureState};
-use crate::{renderer, RenderState, SurfaceErrorAction, WgpuConfiguration};
+use crate::{renderer, PaintBackgroundProps, RenderState, SurfaceErrorAction, WgpuConfiguration};
 use egui::{Context, Event, UserData, ViewportId, ViewportIdMap, ViewportIdSet};
 use std::{num::NonZeroU32, sync::Arc};
 
@@ -444,6 +444,7 @@ impl Painter {
             } else {
                 &output_frame.texture
             };
+            let texture_size = target_texture.size();
             let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
             let (view, resolve_target) = (self.msaa_samples > 1)
@@ -453,18 +454,33 @@ impl Painter {
                     (texture_view, Some(&target_view))
                 });
 
+            // Call the optional background painter callback
+            let (clear_color, clear_depth) = match &self.configuration.paint_background_hook {
+                Some(on_draw_background) => {
+                    on_draw_background(PaintBackgroundProps {
+                        surface_size: [texture_size.width, texture_size.height],
+                        surface_view: view.clone(),
+                    });
+                    (wgpu::LoadOp::Load, wgpu::LoadOp::Load)
+                }
+                None => (
+                    wgpu::LoadOp::Clear(wgpu::Color {
+                        r: clear_color[0] as f64,
+                        g: clear_color[1] as f64,
+                        b: clear_color[2] as f64,
+                        a: clear_color[3] as f64,
+                    }),
+                    wgpu::LoadOp::Clear(1.0),
+                ),
+            };
+
             let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui_render"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color[0] as f64,
-                            g: clear_color[1] as f64,
-                            b: clear_color[2] as f64,
-                            a: clear_color[3] as f64,
-                        }),
+                        load: clear_color,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -472,7 +488,7 @@ impl Painter {
                     wgpu::RenderPassDepthStencilAttachment {
                         view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
+                            load: clear_depth,
                             // It is very unlikely that the depth buffer is needed after egui finished rendering
                             // so no need to store it. (this can improve performance on tiling GPUs like mobile chips or Apple Silicon)
                             store: wgpu::StoreOp::Discard,
