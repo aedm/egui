@@ -12,8 +12,8 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) tex_coords: vec2<f32>,
+    @builtin(position) position: vec4f,
+    @location(0) tex_coords: vec2f,
 };
 
 // meant to be called with 3 vertex indices: 0, 1, 2
@@ -40,7 +40,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let x = f32(vertex_index / 2) * 4.0 - 1.0;
     let y = f32(vertex_index & 1) * 4.0 - 1.0;
 
-    result.position = vec4<f32>(x, y, 0.0, 1.0);
+    result.position = vec4f(x, y, 0.0, 1.0);
 
     var t = uniforms.time / 3.0;
     var sn = sin(t);
@@ -63,16 +63,16 @@ fn pal(t: f32) -> vec3f
 
 // https://en.wikipedia.org/wiki/Orbit_trap
 fn mandelbrot(x: f32, y: f32) -> vec3f {
-    var z = vec2<f32>(x, y);
-    var c = vec2<f32>(x, y);
+    var z = vec2f(x, y);
+    var c = vec2f(x, y);
     var i = 0;
-    var trap = vec2<f32>(uniforms.trap_x, uniforms.trap_y);
+    var trap = vec2f(uniforms.trap_x, uniforms.trap_y);
     var m = 100000.0;
-    while (i < 1000) {
-        z = vec2<f32>(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y);
+    while (i < 150) {
+        z = vec2f(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y);
         var d = z - trap;
         m = min(m, dot(d, d));
-        if (length(z) > 2.0) {
+        if (dot(z, z) > 4.0) {
             var r = m/uniforms.color - uniforms.time * 0.4;
             return pal(r);
         }
@@ -82,11 +82,11 @@ fn mandelbrot(x: f32, y: f32) -> vec3f {
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var uv = vec2<f32>(
+fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    var uv = vec2f(
         in.tex_coords.x - uniforms.center_x,
         in.tex_coords.y - uniforms.center_y
     );
     let m = mandelbrot(uv.x, uv.y);
-    return vec4<f32>(m, 1.0);
+    return vec4f(m, 1.0);
 }

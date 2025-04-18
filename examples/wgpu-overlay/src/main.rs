@@ -53,6 +53,7 @@ fn main() -> eframe::Result {
             ui.add(egui::Slider::new(&mut uniforms.trap_x, -3.0..=3.0).text("trap_x"));
             ui.add(egui::Slider::new(&mut uniforms.trap_y, -3.0..=3.0).text("trap_y"));
             ui.add(egui::Slider::new(&mut uniforms.color, 0.0..=10.0).text("color"));
+            ui.add(egui::Slider::new(&mut uniforms._pad, 0.0..=10.0).text("_pad"));
         });
         let zoom_delta = ctx.input(|i| i.smooth_scroll_delta.y);
         uniforms.zoom += zoom_delta / 1000.0;
@@ -174,10 +175,10 @@ impl CustomWgpuApp {
                 time: 0.0,
                 center_x: 0.65,
                 center_y: 0.45,
-                color: 0.5,
+                color: 1.0,
                 zoom: 0.0,
-                trap_x: 0.7,
-                trap_y: 0.7,
+                trap_x: -0.9,
+                trap_y: -0.9,
                 _pad: 0.0,
             }),
             timer: Instant::now(),
