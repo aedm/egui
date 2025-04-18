@@ -14,8 +14,12 @@ struct Uniforms {
     time: f32,
     center_x: f32,
     center_y: f32,
-    color: f32,
     zoom: f32,
+
+    color: f32,
+    trap_x: f32,
+    trap_y: f32,
+    _pad: f32,
 }
 
 fn main() -> eframe::Result {
@@ -44,14 +48,24 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_simple_native("wgpu + egui overlay demo", options, move |ctx, _frame| {
+        let mut uniforms = app.uniforms.write().unwrap();
         egui::Window::new("settings").show(ctx, |ui| {
-            let mut uniforms = app.uniforms.write().unwrap();
-            ui.add(egui::Slider::new(&mut uniforms.center_x, 0.0..=1.0).text("x"));
-            ui.add(egui::Slider::new(&mut uniforms.center_y, 0.0..=1.0).text("y"));
-            ui.add(egui::Slider::new(&mut uniforms.zoom, 0.0..=1.0).text("zoom"));
-            ui.add(egui::Slider::new(&mut uniforms.color, 0.0..=1.0).text("color"));
-            ctx.request_repaint();
+            ui.add(egui::Slider::new(&mut uniforms.trap_x, -3.0..=3.0).text("trap_x"));
+            ui.add(egui::Slider::new(&mut uniforms.trap_y, -3.0..=3.0).text("trap_y"));
+            ui.add(egui::Slider::new(&mut uniforms.color, 0.0..=10.0).text("color"));
         });
+        let zoom_delta = ctx.input(|i| i.smooth_scroll_delta.y);
+        uniforms.zoom += zoom_delta / 1000.0;
+        let primary_down = ctx.input(|i| i.pointer.primary_down());
+        if primary_down {
+            let zoom_factor = 2.0f32.powf(uniforms.zoom * -20.0);
+            let pointer_delta = ctx.input(|i| i.pointer.delta());
+            let window_size = ctx.input(|i| i.viewport().inner_rect.unwrap().size());
+            let pointer_delta = pointer_delta * zoom_factor;
+            uniforms.center_x += pointer_delta.x / window_size.x;
+            uniforms.center_y += pointer_delta.y / window_size.y;
+        }
+        ctx.request_repaint();
     })
 }
 
@@ -160,8 +174,11 @@ impl CustomWgpuApp {
                 time: 0.0,
                 center_x: 0.65,
                 center_y: 0.45,
-                color: 0.0,
-                zoom: 0.4,
+                color: 0.5,
+                zoom: 0.0,
+                trap_x: 0.7,
+                trap_y: 0.7,
+                _pad: 0.0,
             }),
             timer: Instant::now(),
         }
