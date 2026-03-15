@@ -31,7 +31,11 @@ pub fn update_accesskit_for_text_widget(
             });
         }
 
-        builder.set_role(role);
+        // Only set the role as a fallback. If `widget_info` already set a
+        // specific role (e.g. `Role::Link`), we should not overwrite it.
+        if builder.role() == accesskit::Role::Unknown {
+            builder.set_role(role);
+        }
 
         parent_id
     });

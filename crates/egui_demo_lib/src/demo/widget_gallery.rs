@@ -238,7 +238,7 @@ impl WidgetGallery {
             "Button::image_and_text",
         ));
         if ui
-            .add(egui::Button::image_and_text(egui_icon, "Click me!"))
+            .add(egui::Button::image_and_text(egui_icon, "With image!"))
             .clicked()
         {
             *boolean = !*boolean;
@@ -311,16 +311,31 @@ mod tests {
     use super::*;
     use crate::View as _;
     use egui::Vec2;
+    use egui::accesskit;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
     use egui_kittest::{Harness, SnapshotResults};
+
+    fn make_gallery() -> WidgetGallery {
+        WidgetGallery {
+            date: Some(chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
+            ..Default::default()
+        }
+    }
+
+    fn make_harness() -> Harness<'static, WidgetGallery> {
+        Harness::builder()
+            .with_size(Vec2::new(380.0, 550.0))
+            .build_ui_state(
+                |ui, demo: &mut WidgetGallery| {
+                    egui_extras::install_image_loaders(ui.ctx());
+                    demo.ui(ui);
+                },
+                make_gallery(),
+            )
+    }
 
     #[test]
     pub fn should_match_screenshot() {
-        let mut demo = WidgetGallery {
-            // If we don't set a fixed date, the snapshot test will fail.
-            date: Some(chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
-            ..Default::default()
-        };
-
         let mut results = SnapshotResults::new();
 
         for pixels_per_point in [1, 2] {
@@ -329,10 +344,13 @@ mod tests {
                     .with_pixels_per_point(pixels_per_point as f32)
                     .with_theme(theme)
                     .with_size(Vec2::new(380.0, 550.0))
-                    .build_ui(|ui| {
-                        egui_extras::install_image_loaders(ui.ctx());
-                        demo.ui(ui);
-                    });
+                    .build_ui_state(
+                        |ui, demo: &mut WidgetGallery| {
+                            egui_extras::install_image_loaders(ui.ctx());
+                            demo.ui(ui);
+                        },
+                        make_gallery(),
+                    );
 
                 harness.fit_contents();
 
@@ -345,5 +363,274 @@ mod tests {
                 results.extend_harness(&mut harness);
             }
         }
+    }
+
+    #[test]
+    fn text_edit() {
+        let mut harness = make_harness();
+        assert_eq!(harness.state().string, "");
+
+        // Focus the text input first, then type
+        harness.get_by_role(accesskit::Role::TextInput).click();
+        harness.run();
+
+        harness.get_by_role(accesskit::Role::TextInput).type_text("Hello");
+        harness.run();
+
+        assert_eq!(harness.state().string, "Hello");
+    }
+
+    #[test]
+    fn button_click() {
+        let mut harness = make_harness();
+        assert!(!harness.state().boolean);
+
+        // "Click me!" with Role::Button — the first match is the regular Button
+        harness
+            .get_all_by_role_and_label(accesskit::Role::Button, "Click me!")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+
+        assert!(harness.state().boolean);
+    }
+
+    #[test]
+    fn link_click() {
+        let mut harness = make_harness();
+        assert!(!harness.state().boolean);
+
+        // The "Click me!" Link has Role::Link, so it's unambiguous
+        harness
+            .get_by_role_and_label(accesskit::Role::Link, "Click me!")
+            .click();
+        harness.run();
+
+        assert!(harness.state().boolean);
+    }
+
+    #[test]
+    fn checkbox_toggle() {
+        let mut harness = make_harness();
+        assert!(!harness.state().boolean);
+
+        harness
+            .get_by_role_and_label(accesskit::Role::CheckBox, "Checkbox")
+            .click();
+        harness.run();
+
+        assert!(harness.state().boolean);
+
+        // Toggle back
+        harness
+            .get_by_role_and_label(accesskit::Role::CheckBox, "Checkbox")
+            .click();
+        harness.run();
+
+        assert!(!harness.state().boolean);
+    }
+
+    #[test]
+    fn radio_button() {
+        let mut harness = make_harness();
+        assert_eq!(harness.state().radio, Enum::First);
+
+        harness
+            .get_by_role_and_label(accesskit::Role::RadioButton, "Second")
+            .click();
+        harness.run();
+
+        assert_eq!(harness.state().radio, Enum::Second);
+
+        harness
+            .get_by_role_and_label(accesskit::Role::RadioButton, "Third")
+            .click();
+        harness.run();
+
+        assert_eq!(harness.state().radio, Enum::Third);
+    }
+
+    #[test]
+    fn selectable_label() {
+        let mut harness = make_harness();
+        assert_eq!(harness.state().radio, Enum::First);
+
+        // SelectableLabel is rendered as Role::Button; "Second" button
+        // that is NOT a RadioButton. There are two Role::Button "Second":
+        // the selectable label and the ComboBox option (hidden).
+        // The selectable label is visible so get_by_role_and_label works.
+        harness
+            .get_by_role_and_label(accesskit::Role::Button, "Second")
+            .click();
+        harness.run();
+
+        assert_eq!(harness.state().radio, Enum::Second);
+    }
+
+    #[test]
+    fn combo_box() {
+        let mut harness = make_harness();
+        assert_eq!(harness.state().radio, Enum::First);
+
+        // Open the ComboBox by clicking it
+        harness
+            .get_by_role(accesskit::Role::ComboBox)
+            .click();
+        harness.run();
+
+        // Now the popup is open, click "Third" option inside it.
+        // The popup creates new Role::Button items. But "Third" also exists
+        // as a selectable label. Use get_all and pick the last one (popup item).
+        let thirds: Vec<_> = harness
+            .get_all_by_role_and_label(accesskit::Role::Button, "Third")
+            .collect();
+        thirds.last().unwrap().click();
+        harness.run();
+
+        assert_eq!(harness.state().radio, Enum::Third);
+    }
+
+    #[test]
+    fn slider() {
+        let mut harness = make_harness();
+        let initial = harness.state().scalar;
+        assert!((initial - 42.0).abs() < f32::EPSILON);
+
+        // Click on the right side of the slider to change the value
+        let slider = harness.get_by_role(accesskit::Role::Slider);
+        let rect = slider.rect();
+        // Click at 75% of the slider width to set a value around 270°
+        let click_pos = egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y);
+        harness.event(egui::Event::PointerMoved(click_pos));
+        harness.event(egui::Event::PointerButton {
+            pos: click_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.event(egui::Event::PointerButton {
+            pos: click_pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+
+        // The value should have changed significantly from 42
+        assert!(
+            (harness.state().scalar - initial).abs() > 10.0,
+            "Slider value should have changed, got {}",
+            harness.state().scalar
+        );
+    }
+
+    #[test]
+    fn drag_value() {
+        let mut harness = make_harness();
+        assert!((harness.state().scalar - 42.0).abs() < f32::EPSILON);
+
+        // There are multiple SpinButtons (scalar and opacity). Get the first
+        // one (the scalar DragValue in the grid).
+        harness
+            .get_all_by_role(accesskit::Role::SpinButton)
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+
+        // Select all existing text and replace it
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.event(egui::Event::Text("100".to_owned()));
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+
+        assert!(
+            (harness.state().scalar - 100.0).abs() < f32::EPSILON,
+            "DragValue should be 100, got {}",
+            harness.state().scalar
+        );
+    }
+
+    #[test]
+    fn collapsing_header() {
+        let mut harness = make_harness();
+
+        // Count ProgressIndicator nodes before expanding (ProgressBar is one)
+        let before_count = harness
+            .query_all_by_role(accesskit::Role::ProgressIndicator)
+            .count();
+
+        // Click the collapsing header to expand it, revealing the Spinner
+        harness
+            .get_by_label("Click to see what is hidden!")
+            .click();
+        // Use run_steps instead of run because the Spinner causes continuous repaints
+        harness.run_steps(2);
+
+        // After expanding, there should be one more ProgressIndicator (the Spinner)
+        let after_count = harness
+            .query_all_by_role(accesskit::Role::ProgressIndicator)
+            .count();
+        assert!(
+            after_count > before_count,
+            "Expanding the collapsing header should reveal the Spinner \
+             (before: {before_count}, after: {after_count})"
+        );
+    }
+
+    #[test]
+    fn toggle_switch() {
+        let mut harness = make_harness();
+        assert!(!harness.state().boolean);
+
+        // The toggle switch is a custom widget reporting as Checkbox with empty label.
+        // Find it by looking for a Checkbox that is NOT "Checkbox" (which is the
+        // standard checkbox) and not "Visible"/"Interactive" (bottom checkboxes).
+        let toggles: Vec<_> = harness
+            .get_all_by_role(accesskit::Role::CheckBox)
+            .filter(|n| {
+                let label = n.accesskit_node().label().unwrap_or_default();
+                label.is_empty()
+            })
+            .collect();
+        assert!(!toggles.is_empty(), "Should find the custom toggle switch");
+        toggles[0].click();
+        harness.run();
+
+        assert!(harness.state().boolean);
+    }
+
+    #[test]
+    fn image_button_click() {
+        let mut harness = make_harness();
+        assert!(!harness.state().boolean);
+
+        harness.get_by_label("With image!").click();
+        harness.run();
+
+        assert!(harness.state().boolean);
+    }
+
+    #[test]
+    fn visible_checkbox() {
+        let mut harness = make_harness();
+        assert!(harness.state().visible);
+
+        harness.get_by_label("Visible").click();
+        harness.run();
+
+        assert!(!harness.state().visible);
+    }
+
+    #[test]
+    fn interactive_checkbox() {
+        let mut harness = make_harness();
+        assert!(harness.state().enabled);
+
+        harness.get_by_label("Interactive").click();
+        harness.run();
+
+        assert!(!harness.state().enabled);
     }
 }
