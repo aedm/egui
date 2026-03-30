@@ -29,8 +29,12 @@ snapshot = ["dep:dify", "dep:image", "dep:open", "dep:tempfile", "image/png"]
 ## Allows testing eframe::App
 eframe = ["dep:eframe", "eframe/accesskit"]
 
+## Opens a real window so you can watch the test harness being controlled.
+## Requires `wgpu`.
+headful = ["wgpu", "dep:winit", "dep:egui-winit"]
+
 # This is just so it compiles with `--all-features` on Linux
-x11 = ["eframe?/x11"]
+x11 = ["eframe?/x11", "winit?/x11", "egui-winit?/x11"]
 
 
 [dependencies]
@@ -46,6 +50,10 @@ pollster = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
 # Enable DX12 because it always comes with a software rasterizer.
 wgpu = { workspace = true, features = ["metal", "dx12", "vulkan", "gles"], optional = true }
+
+# headful dependencies
+winit = { workspace = true, optional = true, default-features = false, features = ["rwh_06"] }
+egui-winit = { workspace = true, optional = true, default-features = false }
 
 # snapshot dependencies
 dify = { workspace = true, optional = true }

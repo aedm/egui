@@ -1417,6 +1417,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-wgpu",
+ "egui-winit",
  "egui_extras",
  "image",
  "kittest",
@@ -1426,6 +1427,7 @@ dependencies = [
  "tempfile",
  "toml",
  "wgpu",
+ "winit",
 ]
 
 [[package]]

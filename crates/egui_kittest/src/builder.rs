@@ -142,6 +142,33 @@ impl<State> HarnessBuilder<State> {
         self.renderer(crate::wgpu::WgpuTestRenderer::from_setup(setup))
     }
 
+    /// Open a real desktop window so you can watch the test being controlled.
+    ///
+    /// This enables wgpu rendering and opens a window with the given title.
+    /// Each call to [`Harness::step`] will present the frame to the window.
+    ///
+    /// This also adjusts `step_dt` to 1/30 and `max_steps` to 1000 so that
+    /// the harness runs at a watchable pace.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use egui_kittest::Harness;
+    /// let mut harness = Harness::builder()
+    ///     .headful("My Test Window")
+    ///     .build_ui(|ui| {
+    ///         ui.label("Hello, world!");
+    ///     });
+    /// ```
+    #[cfg(feature = "headful")]
+    pub fn headful(mut self, title: impl Into<String>) -> Self {
+        let width = self.screen_rect.width() as u32;
+        let height = self.screen_rect.height() as u32;
+        self.step_dt = 1.0 / 30.0;
+        self.max_steps = 1000;
+        self.renderer = Box::new(crate::headful::HeadfulRenderer::new(title, width, height));
+        self
+    }
+
     /// Create a new Harness with the given app closure and a state.
     ///
     /// The app closure will immediately be called once to create the initial ui.

@@ -13,6 +13,8 @@ pub use crate::snapshot::*;
 
 mod app_kind;
 mod config;
+#[cfg(feature = "headful")]
+pub mod headful;
 mod node;
 mod renderer;
 #[cfg(feature = "wgpu")]
@@ -302,6 +304,7 @@ impl<'a, State> Harness<'a, State> {
         );
         self.renderer.handle_delta(&output.textures_delta);
         self.output = output;
+        self.renderer.present(&self.ctx, &self.output);
     }
 
     /// Calculate the rect that includes all popups and tooltips.

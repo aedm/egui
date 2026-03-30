@@ -18,6 +18,12 @@ pub trait TestRenderer {
         ctx: &egui::Context,
         output: &egui::FullOutput,
     ) -> Result<image::RgbaImage, String>;
+
+    /// Present the current frame to a visible window.
+    ///
+    /// This is called after each [`crate::Harness::step`] in headful mode.
+    /// The default implementation does nothing (headless).
+    fn present(&mut self, _ctx: &egui::Context, _output: &egui::FullOutput) {}
 }
 
 /// A lazy renderer that initializes the renderer on the first render call.
@@ -85,6 +91,12 @@ impl TestRenderer for LazyRenderer {
                 Ok(image)
             }
             Self::Initialized { renderer } => renderer.render(ctx, output),
+        }
+    }
+
+    fn present(&mut self, ctx: &egui::Context, output: &egui::FullOutput) {
+        if let Self::Initialized { renderer } = self {
+            renderer.present(ctx, output);
         }
     }
 }
