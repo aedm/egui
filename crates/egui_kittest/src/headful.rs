@@ -1,5 +1,5 @@
 use std::iter::once;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use egui::TexturesDelta;
@@ -13,11 +13,9 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use crate::texture_to_image::texture_to_image;
 use crate::wgpu::WAIT_TIMEOUT;
 
-/// A test renderer that opens a real desktop window so you can watch the test harness
-/// being controlled.
-///
-/// Create one via [`crate::HarnessBuilder::headful`].
-pub struct HeadfulRenderer {
+/// Process-global shared window state. Created once, reused by every
+/// [`HeadfulRenderer`] in the process.
+struct SharedState {
     event_loop: EventLoop<()>,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -26,16 +24,25 @@ pub struct HeadfulRenderer {
     surface_height: u32,
 }
 
-impl HeadfulRenderer {
-    /// Create a new [`HeadfulRenderer`] that opens a window with the given title and size.
-    pub fn new(title: impl Into<String>, width: u32, height: u32) -> Self {
-        let title = title.into();
+// SAFETY: `SharedState` contains winit's `EventLoop` which is `!Send + !Sync`
+// on macOS due to Cocoa threading constraints. In our usage the shared state is
+// only ever created and accessed from the main thread (headful tests require
+// `harness = false` which runs `main()` on the main thread). The `Mutex` is
+// only used to provide interior mutability, not cross-thread access.
+#[allow(unsafe_code)]
+unsafe impl Send for SharedState {}
+#[allow(unsafe_code)]
+unsafe impl Sync for SharedState {}
+
+static SHARED: OnceLock<Mutex<SharedState>> = OnceLock::new();
+
+fn get_or_init_shared(title: &str, width: u32, height: u32) -> &'static Mutex<SharedState> {
+    SHARED.get_or_init(|| {
         let mut event_loop = EventLoop::new().expect("Failed to create event loop");
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        // Pump the event loop to get a window created via the Resumed callback.
         let mut creator = WindowCreator {
-            title,
+            title: title.to_owned(),
             width,
             height,
             window: None,
@@ -46,14 +53,12 @@ impl HeadfulRenderer {
             .window
             .expect("Failed to create window (Resumed event was not received)");
 
-        // Create the wgpu instance and surface.
         let setup = crate::wgpu::default_wgpu_setup();
         let instance = pollster::block_on(setup.new_instance());
         let surface = instance
             .create_surface(Arc::clone(&window))
             .expect("Failed to create wgpu surface");
 
-        // Create render state compatible with this surface.
         let render_state = pollster::block_on(egui_wgpu::RenderState::create(
             &egui_wgpu::WgpuConfiguration {
                 wgpu_setup: setup,
@@ -65,7 +70,6 @@ impl HeadfulRenderer {
         ))
         .expect("Failed to create render state");
 
-        // Configure the surface.
         let size = window.inner_size();
         let surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -79,16 +83,18 @@ impl HeadfulRenderer {
         };
         surface.configure(&render_state.device, &surf_config);
 
-        Self {
+        Mutex::new(SharedState {
             event_loop,
             window,
             surface,
             render_state,
             surface_width: size.width.max(1),
             surface_height: size.height.max(1),
-        }
-    }
+        })
+    })
+}
 
+impl SharedState {
     fn resize(&mut self, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
@@ -111,19 +117,60 @@ impl HeadfulRenderer {
     }
 }
 
+/// A test renderer that opens a real desktop window so you can watch the test harness
+/// being controlled.
+///
+/// All instances within a process share a single window, event loop, and wgpu
+/// render state (required on macOS which only allows one `EventLoop` per process).
+///
+/// Create one via [`crate::HarnessBuilder::headful`].
+pub struct HeadfulRenderer {
+    shared: &'static Mutex<SharedState>,
+}
+
+impl HeadfulRenderer {
+    /// Create a new [`HeadfulRenderer`] that opens (or reuses) a window with
+    /// the given title and size.
+    pub fn new(title: impl Into<String>, width: u32, height: u32) -> Self {
+        let title = title.into();
+        let shared = get_or_init_shared(&title, width, height);
+
+        // Resize / retitle the shared window for this harness.
+        {
+            let mut state = shared.lock().unwrap();
+            let _ = state
+                .window
+                .request_inner_size(winit::dpi::LogicalSize::new(width, height));
+            state.window.set_title(&title);
+
+            let size = state.window.inner_size();
+            state.resize(size.width, size.height);
+        }
+
+        Self { shared }
+    }
+
+    /// The window's current scale factor.
+    fn scale_factor(&self) -> f32 {
+        self.shared.lock().unwrap().window.scale_factor() as f32
+    }
+}
+
 impl crate::TestRenderer for HeadfulRenderer {
     #[cfg(feature = "eframe")]
     fn setup_eframe(&self, cc: &mut eframe::CreationContext<'_>, frame: &mut eframe::Frame) {
-        cc.wgpu_render_state = Some(self.render_state.clone());
-        frame.wgpu_render_state = Some(self.render_state.clone());
+        let rs = self.shared.lock().unwrap().render_state.clone();
+        cc.wgpu_render_state = Some(rs.clone());
+        frame.wgpu_render_state = Some(rs);
     }
 
     fn handle_delta(&mut self, delta: &TexturesDelta) {
-        let mut renderer = self.render_state.renderer.write();
+        let state = self.shared.lock().unwrap();
+        let mut renderer = state.render_state.renderer.write();
         for (id, image) in &delta.set {
             renderer.update_texture(
-                &self.render_state.device,
-                &self.render_state.queue,
+                &state.render_state.device,
+                &state.render_state.queue,
                 *id,
                 image,
             );
@@ -136,11 +183,12 @@ impl crate::TestRenderer for HeadfulRenderer {
         ctx: &egui::Context,
         output: &egui::FullOutput,
     ) -> Result<image::RgbaImage, String> {
-        // Offscreen render for snapshot support (same as WgpuTestRenderer).
-        let mut renderer = self.render_state.renderer.write();
+        let state = self.shared.lock().unwrap();
+        let mut renderer = state.render_state.renderer.write();
 
         let mut encoder =
-            self.render_state
+            state
+                .render_state
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Egui Command Encoder"),
@@ -155,30 +203,31 @@ impl crate::TestRenderer for HeadfulRenderer {
         let tessellated = ctx.tessellate(output.shapes.clone(), ctx.pixels_per_point());
 
         let user_buffers = renderer.update_buffers(
-            &self.render_state.device,
-            &self.render_state.queue,
+            &state.render_state.device,
+            &state.render_state.queue,
             &mut encoder,
             &tessellated,
             &screen,
         );
 
-        let texture = self
-            .render_state
-            .device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Egui Texture"),
-                size: wgpu::Extent3d {
-                    width: screen.size_in_pixels[0],
-                    height: screen.size_in_pixels[1],
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.render_state.target_format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+        let texture =
+            state
+                .render_state
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Egui Texture"),
+                    size: wgpu::Extent3d {
+                        width: screen.size_in_pixels[0],
+                        height: screen.size_in_pixels[1],
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: state.render_state.target_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -202,11 +251,13 @@ impl crate::TestRenderer for HeadfulRenderer {
             renderer.render(&mut pass, &tessellated, &screen);
         }
 
-        self.render_state
+        state
+            .render_state
             .queue
             .submit(user_buffers.into_iter().chain(once(encoder.finish())));
 
-        self.render_state
+        state
+            .render_state
             .device
             .poll(wgpu::PollType::Wait {
                 submission_index: None,
@@ -215,33 +266,36 @@ impl crate::TestRenderer for HeadfulRenderer {
             .map_err(|err| format!("PollError: {err}"))?;
 
         Ok(texture_to_image(
-            &self.render_state.device,
-            &self.render_state.queue,
+            &state.render_state.device,
+            &state.render_state.queue,
             &texture,
         ))
     }
 
     fn native_pixels_per_point(&self) -> Option<f32> {
-        Some(self.window.scale_factor() as f32)
+        Some(self.scale_factor())
     }
 
     fn present(&mut self, ctx: &egui::Context, output: &egui::FullOutput) {
+        let mut state = self.shared.lock().unwrap();
+
         // Pump winit events to keep the window responsive.
         let mut handler = EventPumper;
-        self.event_loop
+        state
+            .event_loop
             .pump_app_events(Some(Duration::ZERO), &mut handler);
 
         // Handle window resize.
-        let size = self.window.inner_size();
-        self.resize(size.width, size.height);
+        let size = state.window.inner_size();
+        state.resize(size.width, size.height);
 
         // Get the current surface texture.
-        let output_frame = match self.surface.get_current_texture() {
+        let output_frame = match state.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Outdated) => {
-                // Reconfigure and retry.
-                self.resize(self.surface_width, self.surface_height);
-                match self.surface.get_current_texture() {
+                let (w, h) = (state.surface_width, state.surface_height);
+                state.resize(w, h);
+                match state.surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(err) => {
                         eprintln!("Failed to get surface texture after reconfigure: {err}");
@@ -261,23 +315,24 @@ impl crate::TestRenderer for HeadfulRenderer {
 
         let screen = ScreenDescriptor {
             pixels_per_point: ctx.pixels_per_point(),
-            size_in_pixels: [self.surface_width, self.surface_height],
+            size_in_pixels: [state.surface_width, state.surface_height],
         };
 
         let tessellated = ctx.tessellate(output.shapes.clone(), ctx.pixels_per_point());
 
-        let mut renderer = self.render_state.renderer.write();
+        let mut renderer = state.render_state.renderer.write();
 
         let mut encoder =
-            self.render_state
+            state
+                .render_state
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Headful Present Encoder"),
                 });
 
         let user_buffers = renderer.update_buffers(
-            &self.render_state.device,
-            &self.render_state.queue,
+            &state.render_state.device,
+            &state.render_state.queue,
             &mut encoder,
             &tessellated,
             &screen,
@@ -310,14 +365,14 @@ impl crate::TestRenderer for HeadfulRenderer {
 
         drop(renderer);
 
-        self.render_state
+        state
+            .render_state
             .queue
             .submit(user_buffers.into_iter().chain(once(encoder.finish())));
 
         output_frame.present();
 
-        // Request redraw for the next frame.
-        self.window.request_redraw();
+        state.window.request_redraw();
     }
 }
 

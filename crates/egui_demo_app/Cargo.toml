@@ -86,8 +86,4 @@ wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
 
 [dev-dependencies]
-egui_kittest = { workspace = true, features = ["eframe", "snapshot", "wgpu", "headful"] }
-
-[[test]]
-name = "test_demo_app_headful"
-harness = false
+egui_kittest = { workspace = true, features = ["eframe", "snapshot", "wgpu"] }

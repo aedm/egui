@@ -15,6 +15,7 @@ pub struct HarnessBuilder<State = ()> {
     pub(crate) state: PhantomData<State>,
     pub(crate) renderer: Box<dyn TestRenderer>,
     pub(crate) wait_for_pending_images: bool,
+    pub(crate) headful_pause: std::time::Duration,
 
     #[cfg(feature = "snapshot")]
     pub(crate) default_snapshot_options: crate::SnapshotOptions,
@@ -31,6 +32,7 @@ impl<State> Default for HarnessBuilder<State> {
             max_steps: 4,
             step_dt: 1.0 / 4.0,
             wait_for_pending_images: true,
+            headful_pause: std::time::Duration::ZERO,
             os: egui::os::OperatingSystem::Nix,
 
             #[cfg(feature = "snapshot")]
@@ -119,6 +121,17 @@ impl<State> HarnessBuilder<State> {
         self
     }
 
+    /// Set the pause duration after each [`Harness::run`] / [`Harness::run_steps`] call
+    /// in headful mode. This keeps the window visible between interactions so you can
+    /// watch the test being driven.
+    ///
+    /// Default is 0.2 seconds when headful mode is active, 0 otherwise.
+    #[inline]
+    pub fn with_headful_pause(mut self, pause: std::time::Duration) -> Self {
+        self.headful_pause = pause;
+        self
+    }
+
     /// Set the [`TestRenderer`] to use for rendering.
     ///
     /// By default, a [`LazyRenderer`] is used.
@@ -164,7 +177,8 @@ impl<State> HarnessBuilder<State> {
         let width = self.screen_rect.width() as u32;
         let height = self.screen_rect.height() as u32;
         self.step_dt = 1.0 / 30.0;
-        self.max_steps = 1000;
+        self.max_steps = 100;
+        self.headful_pause = std::time::Duration::from_millis(100);
         let renderer = crate::headful::HeadfulRenderer::new(title, width, height);
         if let Some(ppp) = renderer.native_pixels_per_point() {
             self.pixels_per_point = ppp;
@@ -176,8 +190,10 @@ impl<State> HarnessBuilder<State> {
     /// If the `KITTEST_HEADFUL` environment variable is set and the `headful`
     /// feature is compiled in, upgrade this builder to headful mode.
     ///
-    /// Falls back silently when the window cannot be created (e.g. not on the
-    /// main thread on macOS).
+    /// # Panics
+    /// Panics if the window cannot be created (e.g. not on the main thread on
+    /// macOS). Use `harness = false` in your test binary so it runs on the main
+    /// thread.
     #[track_caller]
     fn apply_env_overrides(self) -> Self {
         #[cfg(feature = "headful")]
@@ -201,9 +217,10 @@ impl<State> HarnessBuilder<State> {
             match result {
                 Ok(renderer) => return self.headful_from_renderer(renderer),
                 Err(_) => {
-                    eprintln!(
-                        "Warning: KITTEST_HEADFUL is set but headful mode failed to initialize \
-                         (not on the main thread?). Falling back to headless rendering."
+                    panic!(
+                        "KITTEST_HEADFUL is set but headful mode failed to initialize. \
+                         On macOS the EventLoop must be created on the main thread. \
+                         Use `harness = false` in Cargo.toml and provide your own `fn main()`."
                     );
                 }
             }
@@ -219,7 +236,8 @@ impl<State> HarnessBuilder<State> {
             self.pixels_per_point = ppp;
         }
         self.step_dt = 1.0 / 30.0;
-        self.max_steps = 1000;
+        self.max_steps = 100;
+        self.headful_pause = std::time::Duration::from_millis(100);
         self.renderer = Box::new(renderer);
         self
     }

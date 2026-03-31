@@ -6,6 +6,15 @@ edition = "2024"
 rust-version = "1.92"
 publish = false
 
+# Custom test target with `harness = false` so tests run on the main thread
+# (required for headful mode on macOS). Shares the same code as the binary.
+autotests = false
+
+[[test]]
+name = "headful_kittest"
+path = "tests/main.rs"
+harness = false
+
 [lints]
 workspace = true
 
@@ -13,4 +22,7 @@ workspace = true
 egui = { workspace = true, features = ["default_fonts"] }
 egui_extras = { workspace = true, features = ["default", "image"] }
 egui_demo_lib = { workspace = true }
-egui_kittest = { workspace = true, features = ["headful"] }
+egui_demo_app = { path = "../../crates/egui_demo_app", default-features = false, features = ["wgpu"] }
+eframe = { workspace = true }
+egui_kittest = { workspace = true, features = ["headful", "eframe"] }
+libtest-mimic = { workspace = true }

@@ -83,6 +83,7 @@ pub struct Harness<'a, State = ()> {
     max_steps: u64,
     step_dt: f32,
     wait_for_pending_images: bool,
+    headful_pause: Duration,
     queued_events: EventQueue,
 
     #[cfg(feature = "snapshot")]
@@ -115,6 +116,7 @@ impl<'a, State> Harness<'a, State> {
             state: _,
             mut renderer,
             wait_for_pending_images,
+            headful_pause,
 
             #[cfg(feature = "snapshot")]
             default_snapshot_options,
@@ -164,6 +166,7 @@ impl<'a, State> Harness<'a, State> {
             max_steps,
             step_dt,
             wait_for_pending_images,
+            headful_pause,
             queued_events: Default::default(),
 
             #[cfg(feature = "snapshot")]
@@ -288,6 +291,19 @@ impl<'a, State> Harness<'a, State> {
         }
     }
 
+    /// In headful mode, keep presenting frames for [`HarnessBuilder::with_headful_pause`]
+    /// duration so the user can see the result of the previous interaction.
+    fn headful_present_pause(&mut self) {
+        if self.headful_pause.is_zero() {
+            return;
+        }
+        let steps = (self.headful_pause.as_secs_f32() / self.step_dt).round() as usize;
+        for _ in 0..steps {
+            self._step(false);
+            std::thread::sleep(Duration::from_secs_f32(self.step_dt));
+        }
+    }
+
     /// Run a single step. This will not process any events.
     fn _step(&mut self, sizing_pass: bool) {
         self.input.predicted_dt = self.step_dt;
@@ -390,6 +406,7 @@ impl<'a, State> Harness<'a, State> {
                 });
             }
         }
+        self.headful_present_pause();
         Ok(steps)
     }
 
@@ -459,6 +476,7 @@ impl<'a, State> Harness<'a, State> {
         for _ in 0..steps {
             self.step();
         }
+        self.headful_present_pause();
     }
 
     /// Access the [`egui::RawInput`] for the next frame.
