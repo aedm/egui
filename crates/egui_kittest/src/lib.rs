@@ -710,6 +710,7 @@ impl<'a, State> Harness<'a, State> {
         Node {
             accesskit_node: self.kittest.root(),
             queue: &self.queued_events,
+            pixels_per_point: self.ctx.pixels_per_point(),
         }
     }
 

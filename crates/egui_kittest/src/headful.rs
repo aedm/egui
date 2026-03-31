@@ -221,6 +221,10 @@ impl crate::TestRenderer for HeadfulRenderer {
         ))
     }
 
+    fn native_pixels_per_point(&self) -> Option<f32> {
+        Some(self.window.scale_factor() as f32)
+    }
+
     fn present(&mut self, ctx: &egui::Context, output: &egui::FullOutput) {
         // Pump winit events to keep the window responsive.
         let mut handler = EventPumper;
@@ -345,7 +349,7 @@ impl ApplicationHandler for WindowCreator {
         if self.window.is_none() {
             let attrs = WindowAttributes::default()
                 .with_title(&self.title)
-                .with_inner_size(winit::dpi::PhysicalSize::new(self.width, self.height));
+                .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height));
             let window = event_loop
                 .create_window(attrs)
                 .expect("Failed to create window");

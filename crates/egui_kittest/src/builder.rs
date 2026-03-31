@@ -165,7 +165,11 @@ impl<State> HarnessBuilder<State> {
         let height = self.screen_rect.height() as u32;
         self.step_dt = 1.0 / 30.0;
         self.max_steps = 1000;
-        self.renderer = Box::new(crate::headful::HeadfulRenderer::new(title, width, height));
+        let renderer = crate::headful::HeadfulRenderer::new(title, width, height);
+        if let Some(ppp) = renderer.native_pixels_per_point() {
+            self.pixels_per_point = ppp;
+        }
+        self.renderer = Box::new(renderer);
         self
     }
 

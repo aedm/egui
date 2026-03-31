@@ -24,6 +24,14 @@ pub trait TestRenderer {
     /// This is called after each [`crate::Harness::step`] in headful mode.
     /// The default implementation does nothing (headless).
     fn present(&mut self, _ctx: &egui::Context, _output: &egui::FullOutput) {}
+
+    /// The native pixels-per-point (DPI scale factor) of the renderer's output surface.
+    ///
+    /// Returns `None` for headless renderers. Headful renderers should return
+    /// the window's scale factor so the harness can match the desktop DPI.
+    fn native_pixels_per_point(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// A lazy renderer that initializes the renderer on the first render call.
