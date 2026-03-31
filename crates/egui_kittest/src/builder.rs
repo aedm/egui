@@ -173,6 +173,57 @@ impl<State> HarnessBuilder<State> {
         self
     }
 
+    /// If the `KITTEST_HEADFUL` environment variable is set and the `headful`
+    /// feature is compiled in, upgrade this builder to headful mode.
+    ///
+    /// Falls back silently when the window cannot be created (e.g. not on the
+    /// main thread on macOS).
+    #[track_caller]
+    fn apply_env_overrides(self) -> Self {
+        #[cfg(feature = "headful")]
+        if std::env::var("KITTEST_HEADFUL").is_ok()
+            && self.renderer.native_pixels_per_point().is_none()
+        {
+            let width = self.screen_rect.width() as u32;
+            let height = self.screen_rect.height() as u32;
+            let caller = std::panic::Location::caller();
+            let title = format!("kittest – {}:{}", caller.file(), caller.line());
+
+            // Suppress the default panic hook during the attempt so a
+            // failed EventLoop creation doesn't print a scary backtrace.
+            let prev_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::headful::HeadfulRenderer::new(title, width, height)
+            }));
+            std::panic::set_hook(prev_hook);
+
+            match result {
+                Ok(renderer) => return self.headful_from_renderer(renderer),
+                Err(_) => {
+                    eprintln!(
+                        "Warning: KITTEST_HEADFUL is set but headful mode failed to initialize \
+                         (not on the main thread?). Falling back to headless rendering."
+                    );
+                }
+            }
+        }
+
+        self
+    }
+
+    /// Apply a pre-created [`crate::headful::HeadfulRenderer`] to this builder.
+    #[cfg(feature = "headful")]
+    fn headful_from_renderer(mut self, renderer: crate::headful::HeadfulRenderer) -> Self {
+        if let Some(ppp) = renderer.native_pixels_per_point() {
+            self.pixels_per_point = ppp;
+        }
+        self.step_dt = 1.0 / 30.0;
+        self.max_steps = 1000;
+        self.renderer = Box::new(renderer);
+        self
+    }
+
     /// Create a new Harness with the given app closure and a state.
     ///
     /// The app closure will immediately be called once to create the initial ui.
@@ -204,7 +255,8 @@ impl<State> HarnessBuilder<State> {
         app: impl FnMut(&egui::Context, &mut State) + 'a,
         state: State,
     ) -> Harness<'a, State> {
-        Harness::from_builder(self, AppKind::ContextState(Box::new(app)), state, None)
+        let this = self.apply_env_overrides();
+        Harness::from_builder(this, AppKind::ContextState(Box::new(app)), state, None)
     }
 
     /// Create a new Harness with the given ui closure and a state.
@@ -234,7 +286,8 @@ impl<State> HarnessBuilder<State> {
         app: impl FnMut(&mut egui::Ui, &mut State) + 'a,
         state: State,
     ) -> Harness<'a, State> {
-        Harness::from_builder(self, AppKind::UiState(Box::new(app)), state, None)
+        let this = self.apply_env_overrides();
+        Harness::from_builder(this, AppKind::UiState(Box::new(app)), state, None)
     }
 
     /// Create a new [Harness] from the given eframe creation closure.
@@ -248,17 +301,19 @@ impl<State> HarnessBuilder<State> {
     where
         State: eframe::App,
     {
+        let this = self.apply_env_overrides();
+
         let ctx = egui::Context::default();
 
         let mut cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut frame = eframe::Frame::_new_kittest();
 
-        self.renderer.setup_eframe(&mut cc, &mut frame);
+        this.renderer.setup_eframe(&mut cc, &mut frame);
 
         let app = build(&mut cc);
 
         let kind = AppKind::Eframe((|state| state, frame));
-        Harness::from_builder(self, kind, app, Some(ctx))
+        Harness::from_builder(this, kind, app, Some(ctx))
     }
 }
 
@@ -285,7 +340,8 @@ impl HarnessBuilder {
     #[track_caller]
     #[deprecated = "use `build_ui` instead"]
     pub fn build<'a>(self, app: impl FnMut(&egui::Context) + 'a) -> Harness<'a> {
-        Harness::from_builder(self, AppKind::Context(Box::new(app)), (), None)
+        let this = self.apply_env_overrides();
+        Harness::from_builder(this, AppKind::Context(Box::new(app)), (), None)
     }
 
     /// Create a new Harness with the given ui closure.
@@ -306,6 +362,7 @@ impl HarnessBuilder {
     #[must_use]
     #[track_caller]
     pub fn build_ui<'a>(self, app: impl FnMut(&mut egui::Ui) + 'a) -> Harness<'a> {
-        Harness::from_builder(self, AppKind::Ui(Box::new(app)), (), None)
+        let this = self.apply_env_overrides();
+        Harness::from_builder(this, AppKind::Ui(Box::new(app)), (), None)
     }
 }
