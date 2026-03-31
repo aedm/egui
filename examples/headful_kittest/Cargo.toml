@@ -1,0 +1,16 @@
+[package]
+name = "headful_kittest"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true, features = ["default_fonts"] }
+egui_extras = { workspace = true, features = ["default", "image"] }
+egui_demo_lib = { workspace = true }
+egui_kittest = { workspace = true, features = ["headful"] }

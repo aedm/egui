@@ -2089,6 +2089,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "headful_kittest"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui_demo_lib",
+ "egui_extras",
+ "egui_kittest",
+]
+
+[[package]]
 name = "hello_android"
 version = "0.1.0"
 dependencies = [
